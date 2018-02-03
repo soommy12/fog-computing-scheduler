@@ -5,11 +5,12 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import task.implementation.Task;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.Map;
 
 /**
@@ -27,6 +28,7 @@ public class TaskSchedulerHandler implements HttpHandler {
     private int strongAvTime = 1400;
     private int minTime;
     private int minID;
+    private String result;
 
 
     //Urls...
@@ -91,35 +93,9 @@ public class TaskSchedulerHandler implements HttpHandler {
         os.close();
         clientCounter++;
 
-
-        //tak odbieramy taska - nowy sposób, nie potrzeba tworzyc przesylac instancji taska
-//        Task t;
-//        try (ObjectInputStream ois = new ObjectInputStream(httpExchange.getRequestBody())) {
-//        try {
-
-            //Testy Object Mappera
-//            InputStream is = httpExchange.getRequestBody();
-//            ObjectMapper mapper = new ObjectMapper();
-//            t = mapper.readValue(is, Task.class);
-//            is.close();
-//            System.out.println("odebrano: " + t.toString());
-//
-//            sendResponse(220,httpExchange);
-//            System.out.print("Recieved object: ");
-//            t = (Task) ois.readObject();
-//            t.setDeadline(deadline);
-//            t.setHard(isHard);
-//            System.out.print(" not sorted array: ");
-//            int[] arr = (int[]) t.getData();
-//            for (int anArr : arr) {
-//                System.out.print(anArr + " ");
-//            }
-//            ois.close();
-//            sendResponse(220,httpExchange);
             /**
              * Algorytm LLF
              */
-
             Task t = new Task();
             int laxity;
             if(isRt){
@@ -130,9 +106,13 @@ public class TaskSchedulerHandler implements HttpHandler {
                     if(isHard){
                         if(this.minTime - tArr <= laxity){
                             Server.rtHardTasksList.add(t);
-                            //szereguje
-                            Collections.sort(Server.rtHardTasksList);
-                            //jezeli w liscie jest to akutlany najmniejszy
+                            Collections.sort(Server.rtHardTasksList, new Task.LaxityComparator());
+                            //if current task has the min laxity
+                            while(true){
+                                int minIdx = Server.rtHardTasksList.indexOf(Collections.min(Server.rtHardTasksList, new Task.LaxityComparator()));
+                                if(Server.rtHardTasksList.get(minIdx).getLaxity() == t.getLaxity())
+                                    break;
+                            }
                             findCurrentMinFinishTimeServer();
                             Server.fogServersFinishTimeMap.put(
                                     this.minID,
@@ -142,78 +122,95 @@ public class TaskSchedulerHandler implements HttpHandler {
                             connection.setRequestProperty("Task-type", taskType);
                             if(taskRange !=0)
                                 connection.setRequestProperty("Task-range", String.valueOf(taskRange));
-                            //odczytac responsa z tego connection
-                            //wyslac responsa do klienta
+
+                            //reading response from fog
+                            System.out.println("Request " + clientCounter + " (HARD) waiting for FOG response...");
+                            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                            StringBuilder stringBuilder = new StringBuilder();
+                            String line = reader.readLine();
+                            stringBuilder.append(line);
+                            this.result = String.valueOf(stringBuilder);
+                            //remove current task from list
                             Server.rtHardTasksList.remove(t);
-                        } else sendResponse(120, httpExchange);
-                    } else {
-                        //tutaj requesty soft
+
+                            //send response to actual client
+                            sendResponse(220, httpExchange);
+                        } else sendResponse(120, httpExchange); //can't compute this hard type request
+                    } else { //soft deadline
+                        //tutaj requesty soft, CHYBA powinny byc jednak w jednej liscie z HARD
+                        Server.rtSoftTasksList.add(t);
+                        Collections.sort(Server.rtSoftTasksList, new Task.LaxityComparator());
+                        //if current task has the min laxity
+                        if(Server.rtHardTasksList.isEmpty()){
+                            while(true){
+                                int minIdx = Server.rtSoftTasksList.indexOf(Collections.min(Server.rtSoftTasksList, new Task.LaxityComparator()));
+                                if(Server.rtSoftTasksList.get(minIdx).getLaxity() == t.getLaxity())
+                                    break;
+                            }
+                            findCurrentMinFinishTimeServer();
+                            Server.fogServersFinishTimeMap.put(
+                                    this.minID,
+                                    Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
+                            );
+                            HttpURLConnection connection = (HttpURLConnection) Server.fogServersURLsMap.get(this.minID).openConnection();
+                            connection.setRequestProperty("Task-type", taskType);
+                            if(taskRange !=0)
+                                connection.setRequestProperty("Task-range", String.valueOf(taskRange));
+
+                            //reading response from fog
+                            System.out.println("Request " + clientCounter + " (SOFT) waiting for FOG response...");
+                            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                            StringBuilder stringBuilder = new StringBuilder();
+                            String line = reader.readLine();
+                            stringBuilder.append(line);
+                            this.result = String.valueOf(stringBuilder);
+                            //remove current task from list
+                            Server.rtSoftTasksList.remove(t);
+
+                            //send response to actual client
+                            sendResponse(220, httpExchange);
+                        }
                     }
                 }
             } else {
                 //tutaj requesty normalne
-                if(Server.rtHardTasksList.isEmpty() && Server.rtSoftTasksList.isEmpty()){
+                Server.rtNormalTasksList.add(t);
+                if(Server.rtNormalTasksList.isEmpty() && Server.rtSoftTasksList.isEmpty()){
                     Server.fogServersFinishTimeMap.put(
                             this.minID,
                             Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
                     );
+                    HttpURLConnection connection = (HttpURLConnection) Server.fogServersURLsMap.get(this.minID).openConnection();
+                    connection.setRequestProperty("Task-type", taskType);
+                    if(taskRange !=0)
+                        connection.setRequestProperty("Task-range", String.valueOf(taskRange));
+
+                    //reading response from fog
+                    System.out.println("Request " + clientCounter + " waiting for FOG response...");
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                    StringBuilder stringBuilder = new StringBuilder();
+                    String line = reader.readLine();
+                    stringBuilder.append(line);
+                    this.result = String.valueOf(stringBuilder);
+                    //remove current task from list
+                    Server.rtHardTasksList.remove(t);
+
+                    //send response to actual client
+                    sendResponse(220, httpExchange);
                 }
 
 
             }
-//            if (isRt) {
-//                //na razie bez obliczania czasu zadania
-//                averageSolvingTime = 1200;  //ale to trzeba jakoś obliczyć
-////                sendResponse(220, httpExchange);
-//                t.setLaxity(deadline - averageSolvingTime); //obliczanie laxity
-//                Server.rtTasksList.add(t);
-//                System.out.println("Added to RT list");
-//
-//                System.out.println("Headery:");
-//                Set<Map.Entry<String, List<String>>> entries = headers.entrySet();
-//                String headerstoPrint = "";
-//                for(Map.Entry<String, List<String>> entry : entries)
-//                    headerstoPrint += entry.toString() + "\n";
-//                System.out.println(headerstoPrint);
-//                sendResponse(220,httpExchange);
-//
-//                //przesylam do serwera obliczeniowego
-////                HttpURLConnection avilableFogServer = (HttpURLConnection) new URL(fogServ1URL).openConnection();
-////                avilableFogServer.setDoOutput(true);
-////                avilableFogServer.setDoInput(true);
-////                avilableFogServer.setRequestMethod(method); // czy potrzebne?
-////                ObjectOutputStream oos = new ObjectOutputStream(avilableFogServer.getOutputStream());
-////                oos.writeObject(t);
-////                oos.close();
-////                System.out.println("4");
-//////                avilableFogServer.getInputStream();
-////                int i = avilableFogServer.getResponseCode(); //pobrac responsa NA SAMYM KONCU!!!
-////                System.out.println("Response code: " + i);
-//            } else {
-//                // jezeli zadanie nie jest typu RT to wrzucamy do zwyklej kolejki
-//                // i w responsie tez oznajmiamy ze uda sie nam obliczyć zadanie
-//                System.out.println("Scheduler putting normal task to list..");
-//                sendResponse(220, httpExchange);
-//                Server.nTasksList.add(t); //placeholder
-//            }
-////            ois.close();
-//        } catch (ClassNotFoundException e) {
-////        } catch (Exception e) {
-//            e.printStackTrace();
-//        }
-
-
-        //Kiedy i jak wykonywac zadania? juz wiem w teorii
     }
 
     private void sendResponse(int responseCode, HttpExchange httpExchange) throws IOException {
         String type;
         if(responseCode == 120){
-            type = "Server Timeout";
+            type = "120 Server Timeout";
         } else if (responseCode == 220){
-            type = "Constraint Satisfied";
+            type = "220 Constraint Satisfied; result: [ " + result + " ]";
         } else if (responseCode == 420){
-          type = "Wrong deadline";
+          type = "420 Wrong deadline";
         } else {
             System.out.println("Wrong responsee");
             return;
@@ -236,9 +233,5 @@ public class TaskSchedulerHandler implements HttpHandler {
                 this.minID = min.getKey();
             }
         }
-    }
-
-    private Comparable findMindLax(LinkedList list){
-        return Collections.min(list);
     }
 }

@@ -17,7 +17,7 @@ public class Server {
     //to serwer ma trzymać kolejki z zadaniami.. NIE! Każdy serwer posiada osobne kolejki...
     static List<Task> rtHardTasksList = new LinkedList<>();
     static List<Task> rtSoftTasksList = new LinkedList<>();
-    static List<Task> rtNormalHTasksList = new LinkedList<>();
+    static List<Task> rtNormalTasksList = new LinkedList<>();
 
     //Fog server urls list... ale moze sie okazac ze trzeba mape!
     static List<URL> fogServerURLsList = new ArrayList<>();

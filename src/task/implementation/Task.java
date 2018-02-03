@@ -48,7 +48,7 @@ public class Task implements Serializable {
         isHard = hard;
     }
 
-    public static class laxityComparator implements Comparator<Task>{
+    public static class LaxityComparator implements Comparator<Task>{
         @Override
         public int compare(Task t1, Task t2) {
             return t1.getLaxity() - t2.getLaxity();
