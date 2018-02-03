@@ -16,6 +16,9 @@ public class Task implements Serializable {
     public Task(Object data) {
         this.data = data;
     }
+    public Task(){
+
+    }
 
     public int getLaxity() {
         return laxity;
@@ -48,16 +51,7 @@ public class Task implements Serializable {
     public static class laxityComparator implements Comparator<Task>{
         @Override
         public int compare(Task t1, Task t2) {
-            boolean b1 = t1.isHard();
-            boolean b2 = t2.isHard();
-
-            if(b1 && b2){
-                return t1.getLaxity() - t2.getLaxity();
-            } else {
-                if(b1) return t1.getLaxity();
-                else return t2.getLaxity();
-            }
-//            return t1.getLaxity() - t2.getLaxity();
+            return t1.getLaxity() - t2.getLaxity();
         }
     }
 }

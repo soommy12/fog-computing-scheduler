@@ -6,13 +6,11 @@ import com.sun.net.httpserver.HttpHandler;
 import task.implementation.Task;
 
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.Map;
 
 /**
  * Created by Bartosz on 17.01.2018.
@@ -22,45 +20,51 @@ public class TaskSchedulerHandler implements HttpHandler {
     private static int clientCounter = 1;
     private static int averageSolvingTime = 0;
 
+    private int fs1FinishTime = 0;
+    private int fs2FinishTime = 0;
+
+    private int fibAvTime = 1100;
+    private int strongAvTime = 1400;
+    private int minTime;
+    private int minID;
+
+
     //Urls...
-//        String fogServ1URL = "http://192.168.1.109:8080/";
-//        String fogServ2URL = "http://192.168.1.109:8080/";
-//        String fogServ1URL = "http://10.0.8.124:8080/"; // host w pracy
-//        String fogServ2URL = "http://10.0.8.124:8080/"; // host w pracy
-//    private String fogServ1URL = "http://192.168.43.98:8080/"; // host na tel
-//    private String fogServ2URL = "http://192.168.43.244:8080/"; // host na tel
-    private String fogServ1URL = "http://192.168.1.115:8080/"; // host w mieszkaniu
+    private String fogServ1URL = "http://192.168.1.116:8080/"; // host w mieszkaniu
     private String fogServ2URL = "http://192.168.1.109:8080/"; // host w mieszkaniu
-    private String isFogServ1Busy = "http://192.168.43.98:8080/isBusy"; //busy na tel
-    private String isFogServ2Busy = "http://192.168.43.244:8080/isBusy"; // busy na tel
-
-    //Fog server urls list...
-    private List<URL> fogServerURLsList = new ArrayList<>();
-
-
-    public TaskSchedulerHandler() throws IOException {
-        //chyba lepiej zostac przy Liscie URL
-        fogServerURLsList.add(new URL(fogServ1URL));
-        fogServerURLsList.add(new URL(fogServ2URL));
-    }
 
     @Override
     public void handle(HttpExchange httpExchange) throws IOException {
 
         Headers headers = httpExchange.getRequestHeaders();
 
-        //Prepare to print
+        //Prepare needed values
         String hardDeadline = null;
         String softDeadline = null;
         int deadline = 0;
+        int tFinish = 0;
+        int tArr = 0;
+        int taskRange = 0;
+        String taskType = null;
         boolean isRt; // real time task flag
         boolean isHard = false; //  hard/soft deadline flag
+        if(headers.containsKey("Task-range"))
+            taskRange = Integer.parseInt(headers.get("Task-range").get(0));
+        if(headers.containsKey("Task-type"))
+            taskType = headers.get("Task-type").get(0);
+        if(taskType.equals("fibo")) averageSolvingTime = fibAvTime;
+        else averageSolvingTime = strongAvTime;
+        if(headers.containsKey("Arrival-time"))
+            tArr = Integer.parseInt(headers.get("Arrival-time").get(0));
         if(headers.containsKey("Hard-deadline")){
+            isRt = true;
+            isHard = true;
             hardDeadline = headers.get("Hard-deadline").get(0);
-            isRt = true;
+            deadline = Integer.parseInt(hardDeadline);
         } else if(headers.containsKey("Soft-deadline")) {
-            softDeadline = headers.get("Soft-deadline").get(0);
             isRt = true;
+            softDeadline = headers.get("Soft-deadline").get(0);
+            deadline = Integer.parseInt(softDeadline);
         } else isRt = false;
 
         String method = httpExchange.getRequestMethod();
@@ -68,144 +72,138 @@ public class TaskSchedulerHandler implements HttpHandler {
 
         //Printing all client requests
         if(hardDeadline != null){
-            deadline = Integer.valueOf(hardDeadline);
-            method = method.concat("RT");
-            isHard = true;
-            System.out.println(String.format(template, String.valueOf(clientCounter), method).concat(String.format(" Hard Deadline: %s", hardDeadline)));
+            System.out.println(String.format(template, String.valueOf(clientCounter), method + "RT").concat(String.format(" Hard Deadline: %s", deadline)));
         } else if (softDeadline != null){
-            deadline = Integer.valueOf(softDeadline);
-            method = method.concat("RT");
-            System.out.println(String.format(template, String.valueOf(clientCounter), method).concat(String.format(" Soft Deadline: %s", softDeadline)));
+            System.out.println(String.format(template, String.valueOf(clientCounter), method + "RT").concat(String.format(" Soft Deadline: %s", deadline)));
         } else {
             System.out.println(String.format(template, String.valueOf(clientCounter), method));
         }
 
-        //tak odbieramy taska
-        Task t;
-        ObjectInputStream ois = new ObjectInputStream(httpExchange.getRequestBody());
-        try {
-            System.out.print("Recieved object:");
-            t = (Task) ois.readObject();
-            t.setDeadline(deadline);
-            t.setHard(isHard);
-            System.out.print(" not sorted array: ");
-            int[] arr = (int[]) t.getData();
-            for (int anArr : arr) {
-                System.out.print(anArr + " ");
-            }
-            ois.close();
-
-            sendResponse(220, httpExchange);
-
-            HttpURLConnection test = (HttpURLConnection) new URL(fogServ1URL).openConnection();
-            test.setDoOutput(true);
-            System.out.println("test__1");
-            ObjectOutputStream stream = new ObjectOutputStream(test.getOutputStream());
-            stream.flush();
-            System.out.println("test__2");
-            stream.writeObject(t);
-            System.out.println("test__3");
-            stream.close();
-            System.out.println("test__4");
-            test.getResponseCode();
-            System.out.println("test__5");
-
-//            /**
-//             * Algorytm LLF
-//             */
-//            if(isRt){
-//                if(Server.rtTasksList.isEmpty()){ // jezeli kolejka RT jest pusta to na pewno uda sie w deadline obliczyc zadanie
-//                    System.out.print("\n!! RT Tasks list EMPTY! ");
-//                    System.out.println("Need to compound average solving time...");
-//                    sendResponse(220, httpExchange);
-//
-//                    //na potrzeby wstepnej implementacji przyjmuje
-//                    this.averageSolvingTime = 1200;  //ale to trzeba jakoś obliczyć
-//                    //a teraz obliczam laxity
-//                    t.setLaxity(deadline - averageSolvingTime);
-//                    Server.rtTasksList.add(t);
-//
-//                    HttpURLConnection avilableFogServer = (HttpURLConnection)new URL(fogServ1URL).openConnection();
-//                    avilableFogServer.setDoOutput(true);
-//                    ObjectOutputStream oos = new ObjectOutputStream(avilableFogServer.getOutputStream());
-//                    oos.writeObject(t);
-//                    oos.close();
-//                    int i = avilableFogServer.getResponseCode(); //pobrac responsa NA SAMYM KONCU!!!
-//                    System.out.println("Response code: " + i);
-//                }
-//               /* else {
-//                    System.out.println("\nNext RT Task...");
-//                    //kolejne zadania RT
-//                    t.setLaxity(deadline - averageSolvingTime);
-//                    System.out.println("next lax: " + t.getLaxity());
-//                    Server.rtTasksList.add(t);
-//                    Server.rtTasksList.sort(new Task.laxityComparator());
-//                    //dla kazdej harda w liscie sprawdzamy czy da sie wykonac zadanie
-//                    for(Task currentRtTask : Server.rtTasksList){
-//                        System.out.println("first for");
-//                        while(!currentRtTask.isHard()){
-//                            System.out.println("in while");
-//                            HttpURLConnection avilableFogServer;
-//                            for(URL url : fogServerURLsList){
-//                                avilableFogServer = (HttpURLConnection) url.openConnection();
-//                                //jezeli jest wolny serwer i i laxity jest wieksze to wysylamy zadanie
-//                                boolean isFree = InetAddress.getByName(url.toString()).isReachable(1);
-//                                if(InetAddress.getByName(url.toString()).isReachable(1)){
-////                                    if(t.getLaxity() > )
-//                                }
-//                                if( isFree && t.getLaxity() > 0){
-//                                    avilableFogServer.setDoOutput(true);
-//                                    ObjectOutputStream oos = new ObjectOutputStream(avilableFogServer.getOutputStream());
-//                                    oos.writeObject(t);
-//                                    oos.close();
-//                                    //pobrac responsa NA SAMYM KONCU!!!
-//                                    avilableFogServer.getResponseCode();
-//                                    break;
-//                                } else { // jezeli nie da sie w w tym czasie obliczyc to
-//                                    if(t.isHard()){ // jezeli to jest hard deadline to nic nie mozemy zrobic, wysylamy odpowiedniego responsa i usuwamy go z listy
-//                                        Server.rtTasksList.remove(currentRtTask);
-//                                        sendResponse(120, httpExchange);
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-//                }*/
-//            } /*else {
-//                // jezeli zadanie nie jest typu RT to wrzucamy do zwyklej kolejki
-//                // i w responsie tez oznajmiamy ze uda sie nam obliczyć zadanie
-//                sendResponse(220, httpExchange);
-//                Server.nTasksList.add(t); //placeholder
-//            }*/
-//
-//
-////            ois.close();
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
-        }
-        //Kiedy i jak wykonywac zadania?
-
-//        /**
-//         * Connection tests
-//         */
-//        HttpURLConnection avilableFogServer;
-//        for(URL url : fogServerURLsList){
-//            avilableFogServer = (HttpURLConnection) url.openConnection();
-//            avilableFogServer.getResponseCode();
-//        }
-
-        //Wypisanie headerów do klienta; zamiast headerów trzeba bedzie odpowiedni response zwrocic
-
-        /*Set<Map.Entry<String, List<String>>> entries = headers.entrySet();
-        String response = "";
-        for(Map.Entry<String, List<String>> entry : entries) {
-            response += entry.toString() + "\n";
-            System.out.println();
-        }
+        //Testing responses
+        String response;
+        if(isRt){
+            if(isHard) response = "Response for client no. " + clientCounter + " identified as HARD";
+            else response = "Response for client no. " + clientCounter + " identified as SOFT";
+        } else response = "Response for client no. " + clientCounter + " identified as NORMAL";
         httpExchange.sendResponseHeaders(200, response.length());
         OutputStream os = httpExchange.getResponseBody();
         os.write(response.getBytes());
-        os.close();*/
+        os.close();
+        clientCounter++;
+
+
+        //tak odbieramy taska - nowy sposób, nie potrzeba tworzyc przesylac instancji taska
+//        Task t;
+//        try (ObjectInputStream ois = new ObjectInputStream(httpExchange.getRequestBody())) {
+//        try {
+
+            //Testy Object Mappera
+//            InputStream is = httpExchange.getRequestBody();
+//            ObjectMapper mapper = new ObjectMapper();
+//            t = mapper.readValue(is, Task.class);
+//            is.close();
+//            System.out.println("odebrano: " + t.toString());
+//
+//            sendResponse(220,httpExchange);
+//            System.out.print("Recieved object: ");
+//            t = (Task) ois.readObject();
+//            t.setDeadline(deadline);
+//            t.setHard(isHard);
+//            System.out.print(" not sorted array: ");
+//            int[] arr = (int[]) t.getData();
+//            for (int anArr : arr) {
+//                System.out.print(anArr + " ");
+//            }
+//            ois.close();
+//            sendResponse(220,httpExchange);
+            /**
+             * Algorytm LLF
+             */
+
+            Task t = new Task();
+            int laxity;
+            if(isRt){
+                laxity = deadline - averageSolvingTime;
+                t.setLaxity(laxity);
+                if(laxity<0) sendResponse(420, httpExchange);
+                else {
+                    if(isHard){
+                        if(this.minTime - tArr <= laxity){
+                            Server.rtHardTasksList.add(t);
+                            //szereguje
+                            Collections.sort(Server.rtHardTasksList);
+                            //jezeli w liscie jest to akutlany najmniejszy
+                            findCurrentMinFinishTimeServer();
+                            Server.fogServersFinishTimeMap.put(
+                                    this.minID,
+                                    Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
+                            );
+                            HttpURLConnection connection = (HttpURLConnection) Server.fogServersURLsMap.get(this.minID).openConnection();
+                            connection.setRequestProperty("Task-type", taskType);
+                            if(taskRange !=0)
+                                connection.setRequestProperty("Task-range", String.valueOf(taskRange));
+                            //odczytac responsa z tego connection
+                            //wyslac responsa do klienta
+                            Server.rtHardTasksList.remove(t);
+                        } else sendResponse(120, httpExchange);
+                    } else {
+                        //tutaj requesty soft
+                    }
+                }
+            } else {
+                //tutaj requesty normalne
+                if(Server.rtHardTasksList.isEmpty() && Server.rtSoftTasksList.isEmpty()){
+                    Server.fogServersFinishTimeMap.put(
+                            this.minID,
+                            Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
+                    );
+                }
+
+
+            }
+//            if (isRt) {
+//                //na razie bez obliczania czasu zadania
+//                averageSolvingTime = 1200;  //ale to trzeba jakoś obliczyć
+////                sendResponse(220, httpExchange);
+//                t.setLaxity(deadline - averageSolvingTime); //obliczanie laxity
+//                Server.rtTasksList.add(t);
+//                System.out.println("Added to RT list");
+//
+//                System.out.println("Headery:");
+//                Set<Map.Entry<String, List<String>>> entries = headers.entrySet();
+//                String headerstoPrint = "";
+//                for(Map.Entry<String, List<String>> entry : entries)
+//                    headerstoPrint += entry.toString() + "\n";
+//                System.out.println(headerstoPrint);
+//                sendResponse(220,httpExchange);
+//
+//                //przesylam do serwera obliczeniowego
+////                HttpURLConnection avilableFogServer = (HttpURLConnection) new URL(fogServ1URL).openConnection();
+////                avilableFogServer.setDoOutput(true);
+////                avilableFogServer.setDoInput(true);
+////                avilableFogServer.setRequestMethod(method); // czy potrzebne?
+////                ObjectOutputStream oos = new ObjectOutputStream(avilableFogServer.getOutputStream());
+////                oos.writeObject(t);
+////                oos.close();
+////                System.out.println("4");
+//////                avilableFogServer.getInputStream();
+////                int i = avilableFogServer.getResponseCode(); //pobrac responsa NA SAMYM KONCU!!!
+////                System.out.println("Response code: " + i);
+//            } else {
+//                // jezeli zadanie nie jest typu RT to wrzucamy do zwyklej kolejki
+//                // i w responsie tez oznajmiamy ze uda sie nam obliczyć zadanie
+//                System.out.println("Scheduler putting normal task to list..");
+//                sendResponse(220, httpExchange);
+//                Server.nTasksList.add(t); //placeholder
+//            }
+////            ois.close();
+//        } catch (ClassNotFoundException e) {
+////        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+
+
+        //Kiedy i jak wykonywac zadania? juz wiem w teorii
     }
 
     private void sendResponse(int responseCode, HttpExchange httpExchange) throws IOException {
@@ -214,16 +212,33 @@ public class TaskSchedulerHandler implements HttpHandler {
             type = "Server Timeout";
         } else if (responseCode == 220){
             type = "Constraint Satisfied";
+        } else if (responseCode == 420){
+          type = "Wrong deadline";
         } else {
             System.out.println("Wrong responsee");
             return;
         }
-//        String response = "Constraint Satisfied for client no. " + clientCounter;
+
         String response = type + " for client no. " + clientCounter;
         httpExchange.sendResponseHeaders(responseCode, response.length());
         OutputStream os = httpExchange.getResponseBody();
         os.write(response.getBytes());
         os.close();
         clientCounter++;
+    }
+
+    private void findCurrentMinFinishTimeServer(){
+        this.minTime = Collections.min(Server.fogServersFinishTimeMap.values());
+        Map.Entry<Integer, Integer> min = null;
+        for(Map.Entry<Integer, Integer> entry : Server.fogServersFinishTimeMap.entrySet()){
+            if(min == null || min.getValue() > entry.getValue()){
+                this.minTime = min.getValue();
+                this.minID = min.getKey();
+            }
+        }
+    }
+
+    private Comparable findMindLax(LinkedList list){
+        return Collections.min(list);
     }
 }
