@@ -14,28 +14,22 @@ import java.util.concurrent.Executors;
  */
 public class Server {
 
-    //to serwer ma trzymać kolejki z zadaniami.. NIE! Każdy serwer posiada osobne kolejki...
+    //Server keeps all tasks list
     static List<Task> rtHardTasksList = new LinkedList<>();
     static List<Task> rtSoftTasksList = new LinkedList<>();
-    static List<Task> rtNormalTasksList = new LinkedList<>();
+    static List<Task> normalTasksList = new LinkedList<>();
 
-    //Fog server urls list... ale moze sie okazac ze trzeba mape!
-    static List<URL> fogServerURLsList = new ArrayList<>();
-    // jednak mapa
-    static Map<Integer, URL> fogServersURLsMap = new HashMap<>();
-    static Map<Integer, Integer> fogServersFinishTimeMap = new HashMap<>();
+    static Map<Integer, URL> fogServersURLsMap = new HashMap<>(); //Fog servers urls map
+    static Map<Integer, Integer> fogServersFinishTimeMap = new HashMap<>(); //Fog servers finish time map
 
     public static void main(String[] args) {
         int port = 8080;
-        boolean isServerFree;
         try {
 
             //urls to edge nodes
-            String fogServ1URL = "http://192.168.1.116:8080/";
-            String fogServ2URL = "http://192.168.1.109:8080/";
-            //filling list
-            fogServerURLsList.add(new URL(fogServ1URL));
-            fogServerURLsList.add(new URL(fogServ2URL));
+            String fogServ1URL = "http://192.168.1.107:8080/";
+            String fogServ2URL = "http://192.168.1.111:8080/";
+
             //filling maps
             fogServersURLsMap.put(1, new URL(fogServ1URL));
             fogServersURLsMap.put(2, new URL(fogServ2URL));
@@ -45,35 +39,12 @@ public class Server {
             HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
             System.out.println("Server started at " + port + " port");
             server.createContext("/", new RootHandler()); // root handler to know if server started
+            server.createContext("/taskScheduler", new TaskSchedulerHandler()); // task scheduler handler
             server.setExecutor(Executors.newCachedThreadPool()); // let server deal with more than 1 request
-            server.start(); // actual start of the server
+            server.start();
 
-            //tu bedziemy wrzucac zadania do wykonywania
-//            while(true){
-//                System.out.println("n size: " + nTasksList.size());
-//                if(!rtTasksList.isEmpty()){
-//                    System.out.println("RT lista nie jest pusta!");
-//                } else if (!nTasksList.isEmpty()){
-//                    System.out.println("FIFO lista nie jest pusta!");
-//                    for(int i = 0; i < nTasksList.size(); i++){
-//                        for(URL url : fogServerURLsList){
-//                            HttpURLConnection availableServer = (HttpURLConnection) url.openConnection();
-//                            if(InetAddress.getByName(url.toString()).isReachable(0)){
-//                                availableServer.setDoOutput(true);
-//                                ObjectOutputStream oos = new ObjectOutputStream(availableServer.getOutputStream());
-//                                oos.writeObject(nTasksList.get(i));
-//                                oos.close();
-//                                nTasksList.remove(i);
-//                                break;
-//                            }
-//
-//                        }
-//                    }
-//                }
-//            }
         } catch (IOException e) {
             e.printStackTrace();
         }
-
     }
 }

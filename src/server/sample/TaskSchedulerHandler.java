@@ -19,32 +19,20 @@ import java.util.Map;
 public class TaskSchedulerHandler implements HttpHandler {
 
     private static int clientCounter = 1;
-    private static int averageSolvingTime = 0;
 
-    private int fs1FinishTime = 0;
-    private int fs2FinishTime = 0;
-
-    private int fibAvTime = 1100;
-    private int strongAvTime = 1400;
     private int minTime;
     private int minID;
     private String result;
-
-
-    //Urls...
-    private String fogServ1URL = "http://192.168.1.116:8080/"; // host w mieszkaniu
-    private String fogServ2URL = "http://192.168.1.109:8080/"; // host w mieszkaniu
 
     @Override
     public void handle(HttpExchange httpExchange) throws IOException {
 
         Headers headers = httpExchange.getRequestHeaders();
-
+        int currentClientID = clientCounter++;
         //Prepare needed values
         String hardDeadline = null;
         String softDeadline = null;
         int deadline = 0;
-        int tFinish = 0;
         int tArr = 0;
         int taskRange = 0;
         String taskType = null;
@@ -54,6 +42,9 @@ public class TaskSchedulerHandler implements HttpHandler {
             taskRange = Integer.parseInt(headers.get("Task-range").get(0));
         if(headers.containsKey("Task-type"))
             taskType = headers.get("Task-type").get(0);
+        int fibAvTime = 1800;
+        int strongAvTime = 2100;
+        int averageSolvingTime;
         if(taskType.equals("fibo")) averageSolvingTime = fibAvTime;
         else averageSolvingTime = strongAvTime;
         if(headers.containsKey("Arrival-time"))
@@ -74,24 +65,12 @@ public class TaskSchedulerHandler implements HttpHandler {
 
         //Printing all client requests
         if(hardDeadline != null){
-            System.out.println(String.format(template, String.valueOf(clientCounter), method + "RT").concat(String.format(" Hard Deadline: %s", deadline)));
+            System.out.println(String.format(template, String.valueOf(currentClientID), method + "RT").concat(String.format(" Hard Deadline: %s", deadline)));
         } else if (softDeadline != null){
-            System.out.println(String.format(template, String.valueOf(clientCounter), method + "RT").concat(String.format(" Soft Deadline: %s", deadline)));
+            System.out.println(String.format(template, String.valueOf(currentClientID), method + "RT").concat(String.format(" Soft Deadline: %s", deadline)));
         } else {
-            System.out.println(String.format(template, String.valueOf(clientCounter), method));
+            System.out.println(String.format(template, String.valueOf(currentClientID), method));
         }
-
-        //Testing responses
-        String response;
-        if(isRt){
-            if(isHard) response = "Response for client no. " + clientCounter + " identified as HARD";
-            else response = "Response for client no. " + clientCounter + " identified as SOFT";
-        } else response = "Response for client no. " + clientCounter + " identified as NORMAL";
-        httpExchange.sendResponseHeaders(200, response.length());
-        OutputStream os = httpExchange.getResponseBody();
-        os.write(response.getBytes());
-        os.close();
-        clientCounter++;
 
             /**
              * Algorytm LLF
@@ -101,30 +80,44 @@ public class TaskSchedulerHandler implements HttpHandler {
             if(isRt){
                 laxity = deadline - averageSolvingTime;
                 t.setLaxity(laxity);
-                if(laxity<0) sendResponse(420, httpExchange);
+                if(laxity<0) sendResponse(420, httpExchange, currentClientID);
                 else {
                     if(isHard){
+                        System.out.println("Identified Hard-deadline");
+                        System.out.println("Looking for best server...");
+                        findCurrentMinFinishTimeServer();
+                        System.out.println("Best Fog Server ID: " + this.minID + " finish time: " + this.minTime);
                         if(this.minTime - tArr <= laxity){
-                            Server.rtHardTasksList.add(t);
-                            Collections.sort(Server.rtHardTasksList, new Task.LaxityComparator());
-                            //if current task has the min laxity
-                            while(true){
-                                int minIdx = Server.rtHardTasksList.indexOf(Collections.min(Server.rtHardTasksList, new Task.LaxityComparator()));
-                                if(Server.rtHardTasksList.get(minIdx).getLaxity() == t.getLaxity())
-                                    break;
-                            }
-                            findCurrentMinFinishTimeServer();
                             Server.fogServersFinishTimeMap.put(
                                     this.minID,
                                     Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
                             );
+                            System.out.println("Server is ok!");
+                            System.out.println("Adding task to RT List...");
+                            Server.rtHardTasksList.add(t);
+                            System.out.println("Sorting RT List...");
+                            Collections.sort(Server.rtHardTasksList, new Task.LaxityComparator());
+                            System.out.println("Current HARD tasks...");
+                            for(Task tt : Server.rtHardTasksList){
+                                System.out.print(tt.getLaxity() + ", ");
+                            }
+//                            if current task has the min laxity
+                            while(true){
+                                int minIdx = Server.rtHardTasksList.indexOf(Collections.min(Server.rtHardTasksList, new Task.LaxityComparator()));
+                                if(Server.rtHardTasksList.get(minIdx).getLaxity() == t.getLaxity()){
+                                    System.out.println("Task from client no. " + currentClientID + " (HARD) has min Laxity now!");
+                                    break;
+                                }
+                            }
+
                             HttpURLConnection connection = (HttpURLConnection) Server.fogServersURLsMap.get(this.minID).openConnection();
+                            connection.setRequestProperty("request-id", String.valueOf(currentClientID));
                             connection.setRequestProperty("Task-type", taskType);
                             if(taskRange !=0)
                                 connection.setRequestProperty("Task-range", String.valueOf(taskRange));
 
                             //reading response from fog
-                            System.out.println("Request " + clientCounter + " (HARD) waiting for FOG response...");
+                            System.out.println("Request " + currentClientID + " (HARD) waiting for FOG response...");
                             BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
                             StringBuilder stringBuilder = new StringBuilder();
                             String line = reader.readLine();
@@ -133,32 +126,45 @@ public class TaskSchedulerHandler implements HttpHandler {
                             //remove current task from list
                             Server.rtHardTasksList.remove(t);
 
+                            System.out.println("Request no. " + currentClientID + " computed by Fog Server " + this.minID + "! Sending response to client.");
                             //send response to actual client
-                            sendResponse(220, httpExchange);
-                        } else sendResponse(120, httpExchange); //can't compute this hard type request
+                            sendResponse(220, httpExchange, currentClientID);
+                        } else sendResponse(120, httpExchange, currentClientID); //can't compute this hard type request
                     } else { //soft deadline
-                        //tutaj requesty soft, CHYBA powinny byc jednak w jednej liscie z HARD
+                        System.out.println("Identified Soft-deadline");
+                        System.out.println("Looking for best server...");
+                        findCurrentMinFinishTimeServer();
+                        System.out.println("Best Fog Server ID: " + this.minID + " finish time: " + this.minTime);
+                        Server.fogServersFinishTimeMap.put(
+                                this.minID,
+                                Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
+                        );
+                        System.out.println("Adding task to RT List...");
                         Server.rtSoftTasksList.add(t);
+                        System.out.println("Sorting RT List...");
                         Collections.sort(Server.rtSoftTasksList, new Task.LaxityComparator());
+                        System.out.println("SOFT tasks laxities...");
+                        for(Task tt : Server.rtSoftTasksList){
+                            System.out.print(tt.getLaxity() + ", ");
+                        }
                         //if current task has the min laxity
                         if(Server.rtHardTasksList.isEmpty()){
+                            System.out.println("No Hard-deadlines for now.");
                             while(true){
                                 int minIdx = Server.rtSoftTasksList.indexOf(Collections.min(Server.rtSoftTasksList, new Task.LaxityComparator()));
-                                if(Server.rtSoftTasksList.get(minIdx).getLaxity() == t.getLaxity())
+                                if(Server.rtSoftTasksList.get(minIdx).getLaxity() == t.getLaxity()){
+                                    System.out.println("Task from client no. " + currentClientID + " (SOFT) has min Laxity now!");
                                     break;
+                                }
                             }
-                            findCurrentMinFinishTimeServer();
-                            Server.fogServersFinishTimeMap.put(
-                                    this.minID,
-                                    Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
-                            );
                             HttpURLConnection connection = (HttpURLConnection) Server.fogServersURLsMap.get(this.minID).openConnection();
+                            connection.setRequestProperty("request-id", String.valueOf(currentClientID));
                             connection.setRequestProperty("Task-type", taskType);
                             if(taskRange !=0)
                                 connection.setRequestProperty("Task-range", String.valueOf(taskRange));
 
                             //reading response from fog
-                            System.out.println("Request " + clientCounter + " (SOFT) waiting for FOG response...");
+                            System.out.println("Request " + currentClientID + " (SOFT) waiting for FOG response...");
                             BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
                             StringBuilder stringBuilder = new StringBuilder();
                             String line = reader.readLine();
@@ -166,27 +172,34 @@ public class TaskSchedulerHandler implements HttpHandler {
                             this.result = String.valueOf(stringBuilder);
                             //remove current task from list
                             Server.rtSoftTasksList.remove(t);
+                            System.out.println("Request no. " + currentClientID + " computed by Fog Server " + this.minID + "! Sending response to client.");
 
                             //send response to actual client
-                            sendResponse(220, httpExchange);
+                            sendResponse(220, httpExchange, currentClientID);
                         }
                     }
                 }
             } else {
-                //tutaj requesty normalne
-                Server.rtNormalTasksList.add(t);
-                if(Server.rtNormalTasksList.isEmpty() && Server.rtSoftTasksList.isEmpty()){
+                //standard requests here
+                System.out.println("Identified Standard request");
+
+                Server.normalTasksList.add(t);
+                if(Server.rtHardTasksList.isEmpty() && Server.rtSoftTasksList.isEmpty()){
+                    System.out.println("No RT Requests now.");
+                    findCurrentMinFinishTimeServer();
+                    System.out.println("Best Fog Server ID: " + this.minID + " finish time: " + this.minTime);
                     Server.fogServersFinishTimeMap.put(
                             this.minID,
                             Server.fogServersFinishTimeMap.get(this.minID) + averageSolvingTime
                     );
                     HttpURLConnection connection = (HttpURLConnection) Server.fogServersURLsMap.get(this.minID).openConnection();
+                    connection.setRequestProperty("request-id", String.valueOf(currentClientID));
                     connection.setRequestProperty("Task-type", taskType);
                     if(taskRange !=0)
                         connection.setRequestProperty("Task-range", String.valueOf(taskRange));
 
                     //reading response from fog
-                    System.out.println("Request " + clientCounter + " waiting for FOG response...");
+                    System.out.println("Request " + currentClientID + " (STANDARD) waiting for FOG response...");
                     BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
                     StringBuilder stringBuilder = new StringBuilder();
                     String line = reader.readLine();
@@ -194,43 +207,42 @@ public class TaskSchedulerHandler implements HttpHandler {
                     this.result = String.valueOf(stringBuilder);
                     //remove current task from list
                     Server.rtHardTasksList.remove(t);
-
+                    System.out.println("Request no. " + currentClientID + " computed by Fog Server " + this.minID + "! Sending response to client.");
                     //send response to actual client
-                    sendResponse(220, httpExchange);
+                    sendResponse(220, httpExchange, currentClientID);
                 }
 
 
             }
     }
 
-    private void sendResponse(int responseCode, HttpExchange httpExchange) throws IOException {
+    private void sendResponse(int responseCode, HttpExchange httpExchange, int no) throws IOException {
         String type;
         if(responseCode == 120){
             type = "120 Server Timeout";
         } else if (responseCode == 220){
-            type = "220 Constraint Satisfied; result: [ " + result + " ]";
+            type = "220 Constraint Satisfied; result: [ " + result + " ]; computed by Fog Server ID: " + this.minID;
         } else if (responseCode == 420){
           type = "420 Wrong deadline";
         } else {
-            System.out.println("Wrong responsee");
+            System.out.println("Wrong response!");
             return;
         }
 
-        String response = type + " for client no. " + clientCounter;
-        httpExchange.sendResponseHeaders(responseCode, response.length());
+        String response = type + " for client no. " + no;
+        httpExchange.sendResponseHeaders(200, response.length());
         OutputStream os = httpExchange.getResponseBody();
         os.write(response.getBytes());
         os.close();
-        clientCounter++;
     }
 
     private void findCurrentMinFinishTimeServer(){
-        this.minTime = Collections.min(Server.fogServersFinishTimeMap.values());
-        Map.Entry<Integer, Integer> min = null;
+        this.minTime = Server.fogServersFinishTimeMap.get(1);
+        this.minID = 1;
         for(Map.Entry<Integer, Integer> entry : Server.fogServersFinishTimeMap.entrySet()){
-            if(min == null || min.getValue() > entry.getValue()){
-                this.minTime = min.getValue();
-                this.minID = min.getKey();
+            if(entry.getValue() < this.minTime ){
+                this.minTime = entry.getValue();
+                this.minID = entry.getKey();
             }
         }
     }
