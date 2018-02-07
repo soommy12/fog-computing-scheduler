@@ -10,31 +10,30 @@ import java.util.*;
 import java.util.concurrent.Executors;
 
 /**
- * Created by Bartosz on 07.01.2018.
+ * Main server with scheduler
  */
 public class Server {
-
     //Server keeps all tasks list
     static List<Task> rtHardTasksList = new LinkedList<>();
     static List<Task> rtSoftTasksList = new LinkedList<>();
     static List<Task> normalTasksList = new LinkedList<>();
-
     static Map<Integer, URL> fogServersURLsMap = new HashMap<>(); //Fog servers urls map
     static Map<Integer, Integer> fogServersFinishTimeMap = new HashMap<>(); //Fog servers finish time map
 
     public static void main(String[] args) {
         int port = 8080;
         try {
-
             //urls to edge nodes
-            String fogServ1URL = "http://192.168.1.107:8080/";
-            String fogServ2URL = "http://192.168.1.111:8080/";
-
+            String fogServ1URL = "http://192.168.43.188:8080/";
+            String fogServ2URL = "http://192.168.43.5:8080/";
+            String fogServ3URL = "http://192.168.43.244:8080/";
             //filling maps
             fogServersURLsMap.put(1, new URL(fogServ1URL));
             fogServersURLsMap.put(2, new URL(fogServ2URL));
+            fogServersURLsMap.put(3, new URL(fogServ3URL));
             fogServersFinishTimeMap.put(1, 0);
             fogServersFinishTimeMap.put(2, 0);
+            fogServersFinishTimeMap.put(3, 0);
 
             HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
             System.out.println("Server started at " + port + " port");
@@ -42,9 +41,10 @@ public class Server {
             server.createContext("/taskScheduler", new TaskSchedulerHandler()); // task scheduler handler
             server.setExecutor(Executors.newCachedThreadPool()); // let server deal with more than 1 request
             server.start();
-
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 }
+
+

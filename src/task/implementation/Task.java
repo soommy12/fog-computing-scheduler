@@ -9,12 +9,30 @@ import java.util.Comparator;
 public class Task implements Serializable {
 
     private int laxity;
+    private int id;
+    private long arrivalt;
 
     public Task(){
     }
 
     public int getLaxity() {
         return laxity;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public void setId(int id) {
+        this.id = id;
+    }
+
+    public long getArrivalt() {
+        return arrivalt;
+    }
+
+    public void setArrivalt(long arrivalt) {
+        this.arrivalt = arrivalt;
     }
 
     public void setLaxity(int laxity) {
